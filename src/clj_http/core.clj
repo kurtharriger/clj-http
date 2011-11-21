@@ -63,27 +63,35 @@
     (SingleClientConnManager. insecure-scheme-registry)
     (SingleClientConnManager.)))
 
+(defn create-multipart-part
+  [filename v]
+  (let [klass (type v)]
+    (cond
+      (= klass File)
+      (FileBody. v filename)
+
+      (= klass InputStream)
+      (InputStreamBody. v filename)
+
+      (= klass (type (byte-array 0)))
+      (ByteArrayBody. v filename)
+
+      (= klass String)
+      (StringBody. v )
+
+      (sequential? v)
+      (map #(create-multipart-part filename %) v))))
+
+
 (defn- create-multipart-entity
   "Takes a multipart map and creates a MultipartEntity with each key/val pair
    added as a part, determining part type by the val type."
   [multipart]
   (let [mp-entity (MultipartEntity.)]
-    (doseq [[k v] multipart]
-      (let [klass (type v)
-            filename (name k)
-            part (cond
-                  (= klass File)
-                  (FileBody. v filename)
-
-                  (= klass InputStream)
-                  (InputStreamBody. v filename)
-
-                  (= klass (type (byte-array 0)))
-                  (ByteArrayBody. v filename)
-
-                  (= klass String)
-                  (StringBody. v))]
-        (.addPart mp-entity filename part)))
+    (doseq [[k v] multipart
+            :let [name (name k)]
+            part (flatten [( create-multipart-part name v)])]
+      (.addPart mp-entity name part))
     mp-entity))
 
 (defn make-reusable-conn-manager
@@ -143,11 +151,8 @@
       (doseq [[header-n header-v] headers]
         (.addHeader http-req header-n header-v))
       (if multipart
-        (let [mp-entity (MultipartEntity.)]
-          (doseq [[k v] multipart]
-            (.addPart mp-entity (name k) (ByteArrayBody. v (name k))))
-          (.setEntity #^HttpEntityEnclosingRequest http-req
-                      (create-multipart-entity multipart)))
+        (.setEntity #^HttpEntityEnclosingRequest http-req
+                    (create-multipart-entity multipart))
         (when body
           (let [http-body (ByteArrayEntity. body)]
             (.setEntity #^HttpEntityEnclosingRequest http-req http-body))))
